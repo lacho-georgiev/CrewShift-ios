@@ -241,17 +241,34 @@ class FlightDataService: ObservableObject {
     private func loadCachedData() {
         guard let cacheFileURL = cacheFileURL,
               FileManager.default.fileExists(atPath: cacheFileURL.path) else {
-            print("DEBUG: No cache file exists yet")
+            print("DEBUG: No cache file exists yet at \(cacheFileURL?.path ?? "unknown path")")
             return
         }
         
         do {
+            print("DEBUG: Loading flight data from cache at \(cacheFileURL.path)")
             let cachedData = try Data(contentsOf: cacheFileURL)
             let decoder = JSONDecoder()
             let cachedFlightData = try decoder.decode([DayData].self, from: cachedData)
             
             DispatchQueue.main.async {
-                print("DEBUG: Loaded \(cachedFlightData.count) days from cache")
+                print("DEBUG: Successfully loaded \(cachedFlightData.count) days from cache")
+                
+                // Find and print April 1st data specifically
+                if let april1 = cachedFlightData.first(where: { $0.individualDay == "Mon, 01Apr" }) {
+                    print("DEBUG: April 1st cached data found")
+                    if let flights = april1.flights {
+                        print("DEBUG: Cached flights for April 1st:")
+                        for (index, flight) in flights.enumerated() {
+                            print("DEBUG:   Flight \(index+1): \(flight.duty) - \(flight.departure) (\(flight.depTime)) to \(flight.arrival) (\(flight.arrivalTime))")
+                        }
+                    } else {
+                        print("DEBUG: No flights found for April 1st in cache")
+                    }
+                } else {
+                    print("DEBUG: No April 1st data found in cache")
+                }
+                
                 self.flightData = cachedFlightData
                 self.lastUpdated = Date()
             }
@@ -267,10 +284,26 @@ class FlightDataService: ObservableObject {
         }
         
         do {
+            print("DEBUG: Saving flight data to cache at \(cacheFileURL.path)")
             let encoder = JSONEncoder()
             let data = try encoder.encode(flightData)
             try data.write(to: cacheFileURL)
-            print("DEBUG: Successfully saved flight data to cache")
+            print("DEBUG: Successfully saved \(flightData.count) days to cache")
+            
+            // Find and print April 1st data specifically
+            if let april1 = flightData.first(where: { $0.individualDay == "Mon, 01Apr" }) {
+                print("DEBUG: April 1st data saved to cache")
+                if let flights = april1.flights {
+                    print("DEBUG: Saved flights for April 1st:")
+                    for (index, flight) in flights.enumerated() {
+                        print("DEBUG:   Flight \(index+1): \(flight.duty) - \(flight.departure) (\(flight.depTime)) to \(flight.arrival) (\(flight.arrivalTime))")
+                    }
+                } else {
+                    print("DEBUG: No flights found for April 1st in saved data")
+                }
+            } else {
+                print("DEBUG: No April 1st data found in saved data")
+            }
         } catch {
             print("ERROR: Failed to save data to cache: \(error.localizedDescription)")
         }
@@ -345,12 +378,29 @@ class FlightDataService: ObservableObject {
     }
     
     private func parseApiResponse(data: Data, cachedData: [DayData]) {
+        print("DEBUG: Parsing API response")
         do {
             let decoder = JSONDecoder()
             
             // Try to decode as an array first
             do {
+                print("DEBUG: Attempting to decode response as array")
                 let decodedData = try decoder.decode([DayData].self, from: data)
+                
+                // Print specific information about April 1st
+                if let april1 = decodedData.first(where: { $0.individualDay == "Mon, 01Apr" }) {
+                    print("DEBUG: April 1st found in API response")
+                    if let flights = april1.flights {
+                        print("DEBUG: API response flights for April 1st:")
+                        for (index, flight) in flights.enumerated() {
+                            print("DEBUG:   Flight \(index+1): \(flight.duty) - \(flight.departure) (\(flight.depTime)) to \(flight.arrival) (\(flight.arrivalTime))")
+                        }
+                    } else {
+                        print("DEBUG: No flights found for April 1st in API response")
+                    }
+                } else {
+                    print("DEBUG: No April 1st data found in API response")
+                }
                 
                 // Detect changes before updating the published data
                 self.detectChanges(oldData: cachedData, newData: decodedData)
@@ -369,11 +419,27 @@ class FlightDataService: ObservableObject {
                 
                 // If that fails, try as a wrapper object
                 do {
+                    print("DEBUG: Attempting to decode response as wrapper object")
                     struct ScheduleResponse: Decodable {
                         let schedule: [DayData]
                     }
                     
                     let response = try decoder.decode(ScheduleResponse.self, from: data)
+                    
+                    // Print specific information about April 1st
+                    if let april1 = response.schedule.first(where: { $0.individualDay == "Mon, 01Apr" }) {
+                        print("DEBUG: April 1st found in wrapped API response")
+                        if let flights = april1.flights {
+                            print("DEBUG: API response (wrapped) flights for April 1st:")
+                            for (index, flight) in flights.enumerated() {
+                                print("DEBUG:   Flight \(index+1): \(flight.duty) - \(flight.departure) (\(flight.depTime)) to \(flight.arrival) (\(flight.arrivalTime))")
+                            }
+                        } else {
+                            print("DEBUG: No flights found for April 1st in wrapped API response")
+                        }
+                    } else {
+                        print("DEBUG: No April 1st data found in wrapped API response")
+                    }
                     
                     // Detect changes before updating the published data
                     self.detectChanges(oldData: cachedData, newData: response.schedule)
@@ -390,7 +456,7 @@ class FlightDataService: ObservableObject {
                 } catch let objectError {
                     self.error = "Failed to decode data"
                     self.isLoading = false
-                    print("ERROR: Failed to decode as object: \(objectError)")
+                    print("ERROR: Failed to decode as object: \(arrayError)")
                     print("ERROR: Full error details - Array decode: \(arrayError), Object decode: \(objectError)")
                     
                     // Fall back to mock data on decode error
@@ -406,6 +472,8 @@ class FlightDataService: ObservableObject {
         changedFlights.removeAll()
         hasChanges = false
         
+        print("DEBUG: Detecting changes between cached and new flight data")
+        
         // Specifically looking for April 1st
         let targetDate = "Mon, 01Apr"
         
@@ -417,6 +485,8 @@ class FlightDataService: ObservableObject {
             return
         }
         
+        print("DEBUG: Found \(oldFlights.count) flights in old data and \(newFlights.count) flights in new data for \(targetDate)")
+        
         // Map flights by duty to easily find corresponding flights
         let oldFlightMap = Dictionary(uniqueKeysWithValues: oldFlights.map { ($0.duty, $0) })
         
@@ -424,6 +494,10 @@ class FlightDataService: ObservableObject {
             if let oldFlight = oldFlightMap[newFlight.duty] {
                 let depTimeChanged = newFlight.depTime != oldFlight.depTime
                 let arrivalTimeChanged = newFlight.arrivalTime != oldFlight.arrivalTime
+                
+                print("DEBUG: Comparing flight \(newFlight.duty)")
+                print("DEBUG:   Old departure: \(oldFlight.depTime), New departure: \(newFlight.depTime)")
+                print("DEBUG:   Old arrival: \(oldFlight.arrivalTime), New arrival: \(newFlight.arrivalTime)")
                 
                 if depTimeChanged || arrivalTimeChanged {
                     changedFlights.append(ChangedFlight(
@@ -435,13 +509,15 @@ class FlightDataService: ObservableObject {
                     ))
                     hasChanges = true
                     
-                    print("DEBUG: Detected change in flight \(newFlight.duty)")
+                    print("DEBUG: ✅ Detected change in flight \(newFlight.duty)")
                     if depTimeChanged {
-                        print("DEBUG: Departure time changed from \(oldFlight.depTime) to \(newFlight.depTime)")
+                        print("DEBUG: ⏰ Departure time changed from \(oldFlight.depTime) to \(newFlight.depTime)")
                     }
                     if arrivalTimeChanged {
-                        print("DEBUG: Arrival time changed from \(oldFlight.arrivalTime) to \(newFlight.arrivalTime)")
+                        print("DEBUG: ⏰ Arrival time changed from \(oldFlight.arrivalTime) to \(newFlight.arrivalTime)")
                     }
+                } else {
+                    print("DEBUG: ✓ No changes detected for flight \(newFlight.duty)")
                 }
             } else {
                 // This is a new flight that wasn't in the old data
@@ -453,11 +529,36 @@ class FlightDataService: ObservableObject {
                     isNewArrivalTime: true
                 ))
                 hasChanges = true
-                print("DEBUG: Detected new flight \(newFlight.duty)")
+                print("DEBUG: ➕ Detected new flight \(newFlight.duty) that wasn't in previous data")
             }
         }
         
-        print("DEBUG: Found \(changedFlights.count) changed flights")
+        print("DEBUG: Found \(changedFlights.count) changed flights in total")
+        
+        if hasChanges {
+            // Send a local notification about the changes
+            sendFlightChangeNotification()
+        } else {
+            print("DEBUG: No changes detected for April 1st flights")
+        }
+    }
+    
+    // MARK: - Notifications
+    
+    private func sendFlightChangeNotification() {
+        let content = UNMutableNotificationContent()
+        content.title = "Flight Schedule Updated"
+        content.body = "Your flight times for April 1st have been updated."
+        content.sound = UNNotificationSound.default
+        
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        let request = UNNotificationRequest(identifier: "flightUpdate", content: content, trigger: trigger)
+        
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                print("Error showing notification: \(error.localizedDescription)")
+            }
+        }
     }
     
     private func printDecodedData() {
@@ -480,7 +581,7 @@ class FlightDataService: ObservableObject {
     
     // For testing purposes, we'll modify the mock data to simulate time changes
     private func loadMockData() {
-        print("DEBUG: Loading mock flight data with simulated changes")
+        print("DEBUG: 📱 Loading mock flight data with simulated changes")
         
         // Create mock flight data with different times to simulate changes
         let flight1 = Flight(
@@ -530,57 +631,68 @@ class FlightDataService: ObservableObject {
         self.lastUpdated = Date()
         self.isLoading = false
         
-        // Simulate detecting changes from cache
-        if !changedFlights.isEmpty {
-            return // Already detected changes, don't override
+        // Save the mock data to cache
+        self.saveDataToCache()
+        
+        // If we're running for the first time or we're forcing regeneration of changes
+        if changedFlights.isEmpty {
+            print("DEBUG: Generating simulated changes for testing")
+            
+            // Create simulated old flights for comparison - THIS IS THE "CACHED" DATA
+            let oldFlight1 = Flight(
+                duty: "CAI8001",
+                departure: "SOF",
+                arrival: "WAW",
+                depTime: "04:45", // Original time
+                arrivalTime: "07:45",
+                checkIn: "03:45",
+                checkOut: nil,
+                aircraft: "A320/BHL",
+                cockpit: "TRI G.GOSPODINOV; COP US R. BERNARDO",
+                cabin: "SEN CCM S.ZHEKOVA; INS CCM A.IVANOVA; CCM K.KALOYANOV"
+            )
+            
+            let oldFlight2 = Flight(
+                duty: "CAI8002",
+                departure: "WAW",
+                arrival: "AYT",
+                depTime: "08:30",
+                arrivalTime: "10:45", // Original time
+                checkIn: nil,
+                checkOut: "12:10",
+                aircraft: "A320/BHL",
+                cockpit: "TRI G.GOSPODINOV; COP US R. BERNARDO",
+                cabin: "SEN CCM S.ZHEKOVA; CCM 2 Y.BOEVA; CCM M.ANDREEV"
+            )
+            
+            // Create a fake cached version with the old times
+            let oldDay1 = DayData(
+                individualDay: "Mon, 01Apr",
+                date: "2025-04-01",
+                ftBlh: "05:55",
+                fdt: "07:55",
+                dt: "08:25",
+                rp: "17:30",
+                flights: [oldFlight1, oldFlight2]
+            )
+            
+            let oldCachedData = [oldDay1, dayOff]
+            
+            print("DEBUG: Simulated OLD cached data:")
+            for (index, flight) in oldDay1.flights!.enumerated() {
+                print("DEBUG:   Flight \(index+1): \(flight.duty) - \(flight.departure) (\(flight.depTime)) to \(flight.arrival) (\(flight.arrivalTime))")
+            }
+            
+            print("DEBUG: Simulated NEW data:")
+            for (index, flight) in day1.flights!.enumerated() {
+                print("DEBUG:   Flight \(index+1): \(flight.duty) - \(flight.departure) (\(flight.depTime)) to \(flight.arrival) (\(flight.arrivalTime))")
+            }
+            
+            // Detect changes between the fake old data and the new mock data
+            detectChanges(oldData: oldCachedData, newData: self.flightData)
+            
+            print("DEBUG: Simulated \(changedFlights.count) changed flights for testing")
         }
-        
-        // Create simulated old flights for comparison
-        let oldFlight1 = Flight(
-            duty: "CAI8001",
-            departure: "SOF",
-            arrival: "WAW",
-            depTime: "04:45", // Original time
-            arrivalTime: "07:45",
-            checkIn: "03:45",
-            checkOut: nil,
-            aircraft: "A320/BHL",
-            cockpit: "TRI G.GOSPODINOV; COP US R. BERNARDO",
-            cabin: "SEN CCM S.ZHEKOVA; INS CCM A.IVANOVA; CCM K.KALOYANOV"
-        )
-        
-        let oldFlight2 = Flight(
-            duty: "CAI8002",
-            departure: "WAW",
-            arrival: "AYT",
-            depTime: "08:30",
-            arrivalTime: "10:45", // Original time
-            checkIn: nil,
-            checkOut: "12:10",
-            aircraft: "A320/BHL",
-            cockpit: "TRI G.GOSPODINOV; COP US R. BERNARDO",
-            cabin: "SEN CCM S.ZHEKOVA; CCM 2 Y.BOEVA; CCM M.ANDREEV"
-        )
-        
-        // Add simulated changes for testing UI
-        changedFlights.append(ChangedFlight(
-            flight: flight1,
-            oldDepTime: oldFlight1.depTime,
-            oldArrivalTime: nil,
-            isNewDepTime: true,
-            isNewArrivalTime: false
-        ))
-        
-        changedFlights.append(ChangedFlight(
-            flight: flight2,
-            oldDepTime: nil,
-            oldArrivalTime: oldFlight2.arrivalTime,
-            isNewDepTime: false,
-            isNewArrivalTime: true
-        ))
-        
-        hasChanges = true
-        print("DEBUG: Simulated \(changedFlights.count) changed flights for testing")
     }
     
     // MARK: - Helper Methods (unchanged)

@@ -19,6 +19,7 @@ struct AnimatedFlightCard: View {
     // Sample crew images - in a real app, this would come from the flight data
     let crewImages = ["crew1", "crew2", "crew3", "crew4", "crew5"]
     
+    // This card has an automatic animation from old to new time values
     var body: some View {
         VStack(spacing: 15) {
             // Flight header - Origin, Flight number, Destination
@@ -245,16 +246,16 @@ struct AnimatedFlightCard: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
             
-            // Change notification banner if needed
+            // Change notification label if needed (no button, just shows the changes)
             if let changedFlight = changedFlight, showChangeAlert {
                 HStack {
                     Image(systemName: "clock.arrow.circlepath")
-                        .foregroundColor(Color(hex: "4CAF50"))
+                        .foregroundColor(Color(hex: "FF3B30"))
                         .font(.system(size: 16))
                     
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Flight time updated")
-                            .font(.system(size: 14, weight: .medium))
+                        Text("Flight time has changed!")
+                            .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(Color(hex: "333333"))
                         
                         if changedFlight.isNewDepTime, let oldTime = changedFlight.oldDepTime {
@@ -271,32 +272,14 @@ struct AnimatedFlightCard: View {
                     }
                     
                     Spacer()
-                    
-                    Button(action: {
-                        withAnimation(.spring()) {
-                            showChangeAlert = false
-                            // Start the transition animation with a slight delay
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                animateTimeChanges()
-                            }
-                        }
-                    }) {
-                        Text("Animate")
-                            .font(.system(size: 12))
-                            .foregroundColor(Color.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(Color(hex: "4CAF50"))
-                            .cornerRadius(12)
-                    }
                 }
                 .padding(12)
                 .background(
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(Color(hex: "F0F7F0"))
+                        .fill(Color(hex: "FFEFEF"))
                         .overlay(
                             RoundedRectangle(cornerRadius: 10)
-                                .stroke(Color(hex: "4CAF50").opacity(0.2), lineWidth: 1)
+                                .stroke(Color(hex: "FF3B30").opacity(0.2), lineWidth: 1)
                         )
                 )
                 .padding(.top, 8)
@@ -325,10 +308,36 @@ struct AnimatedFlightCard: View {
         .offset(y: appear ? 0 : 15)
         .blur(radius: appear ? 0 : 5)
         .onAppear {
+            print("DEBUG: FlightCard onAppear - Flight \(flight.duty)")
+            if let changedFlight = changedFlight {
+                print("DEBUG: Flight has changes detected:")
+                if changedFlight.isNewDepTime, let oldTime = changedFlight.oldDepTime {
+                    print("DEBUG: Departure time changed: \(oldTime) → \(flight.depTime)")
+                }
+                if changedFlight.isNewArrivalTime, let oldTime = changedFlight.oldArrivalTime {
+                    print("DEBUG: Arrival time changed: \(oldTime) → \(flight.arrivalTime)")
+                }
+            } else {
+                print("DEBUG: No changes for this flight")
+            }
+            
             // Delayed card entrance animation for a staggered effect
+            print("DEBUG: Card will appear after \(Double(index) * 0.2) seconds")
             DispatchQueue.main.asyncAfter(deadline: .now() + Double(index) * 0.2) {
+                print("DEBUG: Starting card appearance animation")
                 withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
                     appear = true
+                }
+                
+                // Automatically start time change animation after card appears
+                if changedFlight != nil {
+                    // Let the card appear fully first
+                    let animationDelay = 1.0
+                    print("DEBUG: Animation will start in \(animationDelay) seconds")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + animationDelay) {
+                        print("DEBUG: Triggering automatic time change animation")
+                        animateTimeChanges()
+                    }
                 }
             }
             
@@ -338,61 +347,90 @@ struct AnimatedFlightCard: View {
             animationTriggered = false
             showChangeAlert = true
             highlightChanges = false
+            print("DEBUG: Animation states reset to initial values")
         }
     }
     
     // Function to animate the time changes with beautiful choreography
     private func animateTimeChanges() {
+        print("DEBUG: Starting animateTimeChanges() sequence")
+        
         // Initial delay before starting the sequence
         let initialDelay = 0.3
+        print("DEBUG: Initial animation delay: \(initialDelay) seconds")
         
         // First gently highlight the changed times
         DispatchQueue.main.asyncAfter(deadline: .now() + initialDelay) {
+            print("DEBUG: Starting highlight animation")
             withAnimation(.easeInOut(duration: 0.6)) {
                 highlightChanges = true
             }
             
             // Brief pause to let user notice the highlight
             let highlightPause = 0.8
+            print("DEBUG: Highlight pause: \(highlightPause) seconds")
             
             // Animate departure time with a gentle spring
-            if let changedFlight = changedFlight, changedFlight.isNewDepTime {
+            if let changedFlight = self.changedFlight, changedFlight.isNewDepTime, let oldTime = changedFlight.oldDepTime {
+                print("DEBUG: Will animate departure time from \(oldTime) → \(self.flight.depTime)")
                 DispatchQueue.main.asyncAfter(deadline: .now() + highlightPause) {
+                    print("DEBUG: Starting departure time animation after pause")
                     withAnimation(.spring(response: 0.7, dampingFraction: 0.7)) {
                         showOldDepTime = false
+                        print("DEBUG: Departure time animation in progress")
                     }
                     
                     // Play subtle scale animation on the new value
                     let scaleDuration = 0.3
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        print("DEBUG: Departure scale animation")
                         withAnimation(.easeOut(duration: scaleDuration)) {
                             // This will be handled by the changed color
                         }
                     }
                 }
+            } else {
+                print("DEBUG: No departure time change to animate")
             }
             
             // Animate arrival time with a matching spring but delayed
-            if let changedFlight = changedFlight, changedFlight.isNewArrivalTime {
+            if let changedFlight = self.changedFlight, changedFlight.isNewArrivalTime, let oldTime = changedFlight.oldArrivalTime {
                 // Add enough delay so the first animation has time to complete
-                DispatchQueue.main.asyncAfter(deadline: .now() + highlightPause + 0.8) {
+                let arrivalDelay = highlightPause + 0.8
+                print("DEBUG: Will animate arrival time from \(oldTime) → \(self.flight.arrivalTime) after \(arrivalDelay) seconds")
+                DispatchQueue.main.asyncAfter(deadline: .now() + arrivalDelay) {
+                    print("DEBUG: Starting arrival time animation")
                     withAnimation(.spring(response: 0.7, dampingFraction: 0.7)) {
                         showOldArrTime = false
+                        print("DEBUG: Arrival time animation in progress")
                     }
                     
                     // Play subtle scale animation on the new value
                     let scaleDuration = 0.3
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        print("DEBUG: Arrival scale animation")
                         withAnimation(.easeOut(duration: scaleDuration)) {
                             // This will be handled by the changed color
                         }
                     }
+                }
+            } else {
+                print("DEBUG: No arrival time change to animate")
+            }
+            
+            // Hide the alert banner after all animations complete
+            let totalDuration = highlightPause + 2.0
+            DispatchQueue.main.asyncAfter(deadline: .now() + totalDuration) {
+                print("DEBUG: Hiding alert banner after all animations")
+                withAnimation(.easeOut(duration: 0.3)) {
+                    showChangeAlert = false
                 }
             }
         }
         
         // Mark animation as triggered
         animationTriggered = true
+        print("DEBUG: Animation sequence initiated")
     }
 }
 
