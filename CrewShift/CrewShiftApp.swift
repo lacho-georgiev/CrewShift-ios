@@ -22,7 +22,7 @@ struct CrewShiftApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            CustomTabView()
         }
     }
     
