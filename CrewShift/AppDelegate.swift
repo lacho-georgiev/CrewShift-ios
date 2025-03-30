@@ -11,7 +11,11 @@ import FirebaseMessaging
 import UserNotifications
 import FirebaseAuth
 
+
+
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
+    // Flight data service for background fetching
+    var flightDataService = FlightDataService()
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
@@ -28,8 +32,51 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         // Set Messaging delegate
         Messaging.messaging().delegate = self
-
+        
+        // Setup background fetch capability
+        setupBackgroundFetch()
+        
+        // Initialize flight data service and load cached data
+        _ = flightDataService
+        
         return true
+    }
+    
+    // Setup background fetch capability
+    private func setupBackgroundFetch() {
+        UIApplication.shared.setMinimumBackgroundFetchInterval(UIApplication.backgroundFetchIntervalMinimum)
+    }
+    
+    // Handle background fetch
+    func application(_ application: UIApplication, performFetchWithCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        var fetchResult = UIBackgroundFetchResult.noData
+        var didComplete = false
+        
+        // Create a publisher-subscriber relationship to monitor for changes
+        let cancellable = flightDataService.$hasChanges.sink { hasChanges in
+            if hasChanges && !didComplete {
+                fetchResult = .newData
+                didComplete = true
+                completionHandler(fetchResult)
+            }
+        }
+        
+        // Fetch the latest flight data
+        flightDataService.fetchFlightData()
+        
+        // Set a timeout to ensure the completion handler gets called
+        DispatchQueue.main.asyncAfter(deadline: .now() + 25) {
+            if !didComplete {
+                didComplete = true
+                cancellable.cancel()
+                completionHandler(fetchResult)
+            }
+        }
+    }
+    
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        // Refresh flight data when app becomes active
+        flightDataService.fetchFlightData()
     }
 
     // Called when APNs has assigned a device token.
@@ -48,39 +95,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
 
     // This function sends the FCM token to your backend endpoint.
-    // Alternatively, you could write the token directly to Firestore here.
     func sendFCMTokenToServer(token: String) {
         // Retrieve current user uid from Firebase Auth.
         guard let uid = Auth.auth().currentUser?.uid else {
             print("No current user, cannot send FCM token.")
             return
         }
-
-        // Option 1: Send to backend via secure endpoint.
-//        let urlString = "https://your-api-url.com/user/\(uid)/fcm-token"
-//        guard let url = URL(string: urlString) else { return }
-//
-//        var request = URLRequest(url: url)
-//        request.httpMethod = "POST"
-//        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-//        request.setValue("Bearer \(uid)", forHTTPHeaderField: "Authorization")
-//
-//        let body = ["token": token]
-//        guard let httpBody = try? JSONSerialization.data(withJSONObject: body, options: []) else { return }
-//        request.httpBody = httpBody
-//
-//        let task = URLSession.shared.dataTask(with: request) { data, response, error in
-//            if let error = error {
-//                print("Error sending FCM token: \(error.localizedDescription)")
-//            } else if let response = response as? HTTPURLResponse, response.statusCode == 200 {
-//                print("FCM token sent successfully to server.")
-//            } else {
-//                print("Unexpected response when sending FCM token.")
-//            }
-//        }
-//        task.resume()
-
-        // Option 2: Directly write to Firestore (uncomment if you prefer this approach)
 
         let db = Firestore.firestore()
         db.collection("user").document(uid).setData(["fcm_token": token], merge: true) { error in
@@ -90,7 +110,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 print("FCM token saved directly to Firestore for uid: \(uid)")
             }
         }
-
     }
 
     // MARK: - UNUserNotificationCenterDelegate
@@ -100,5 +119,20 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.alert, .sound])
+    }
+    
+    // Handle notification response
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                               didReceive response: UNNotificationResponse,
+                               withCompletionHandler completionHandler: @escaping () -> Void) {
+        let userInfo = response.notification.request.content.userInfo
+        
+        // Check if it's a flight update notification
+        if response.notification.request.identifier == "flightUpdate" {
+            // You could post a notification to navigate to the flight details screen
+            NotificationCenter.default.post(name: NSNotification.Name("ShowFlightUpdates"), object: nil)
+        }
+        
+        completionHandler()
     }
 }

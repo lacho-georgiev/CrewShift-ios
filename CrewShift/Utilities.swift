@@ -1,10 +1,13 @@
 import Foundation
 import SwiftUI
 
+import Foundation
+import SwiftUI
+
 // MARK: - Data Models
 
 // Flight model
-struct Flight: Identifiable, Decodable, Equatable {
+struct Flight: Identifiable, Codable, Equatable {
     var id: String { duty }
     var duty: String
     var departure: String
@@ -40,7 +43,7 @@ struct Flight: Identifiable, Decodable, Equatable {
 }
 
 // Day model for individual days in the schedule
-struct DayData: Identifiable, Decodable, Equatable {
+struct DayData: Identifiable, Codable, Equatable {
     var id: String { individualDay }
     var individualDay: String
     var date: String?
@@ -190,7 +193,6 @@ extension Color {
 
 
 
-
 import Foundation
 import SwiftUI
 import Combine
@@ -201,20 +203,86 @@ class FlightDataService: ObservableObject {
     @Published var flightData: [DayData] = []
     @Published var isLoading: Bool = false
     @Published var error: String? = nil
-    @Published var lastUpdated: Date = Date() // To track when data changes
+    @Published var lastUpdated: Date = Date()
+    
+    // New properties for change detection
+    @Published var changedFlights: [ChangedFlight] = []
+    @Published var hasChanges: Bool = false
     
     private var cancellables = Set<AnyCancellable>()
     private var db: Firestore {
         return Firestore.firestore()
     }
     
+    // Cache file URL
+    private var cacheFileURL: URL? {
+        guard let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        return documentsDirectory.appendingPathComponent("cached_flight_data.json")
+    }
+    
+    struct ChangedFlight: Identifiable {
+        let id = UUID()
+        let flight: Flight
+        let oldDepTime: String?
+        let oldArrivalTime: String?
+        let isNewDepTime: Bool
+        let isNewArrivalTime: Bool
+    }
+    
     init() {
+        loadCachedData()
         fetchFlightData()
     }
+    
+    // MARK: - Caching Methods
+    
+    private func loadCachedData() {
+        guard let cacheFileURL = cacheFileURL,
+              FileManager.default.fileExists(atPath: cacheFileURL.path) else {
+            print("DEBUG: No cache file exists yet")
+            return
+        }
+        
+        do {
+            let cachedData = try Data(contentsOf: cacheFileURL)
+            let decoder = JSONDecoder()
+            let cachedFlightData = try decoder.decode([DayData].self, from: cachedData)
+            
+            DispatchQueue.main.async {
+                print("DEBUG: Loaded \(cachedFlightData.count) days from cache")
+                self.flightData = cachedFlightData
+                self.lastUpdated = Date()
+            }
+        } catch {
+            print("ERROR: Failed to load cached data: \(error.localizedDescription)")
+        }
+    }
+    
+    private func saveDataToCache() {
+        guard let cacheFileURL = cacheFileURL, !flightData.isEmpty else {
+            print("DEBUG: No data to cache or cache URL unavailable")
+            return
+        }
+        
+        do {
+            let encoder = JSONEncoder()
+            let data = try encoder.encode(flightData)
+            try data.write(to: cacheFileURL)
+            print("DEBUG: Successfully saved flight data to cache")
+        } catch {
+            print("ERROR: Failed to save data to cache: \(error.localizedDescription)")
+        }
+    }
+    
+    // MARK: - API and Data Methods
     
     func fetchFlightData() {
         isLoading = true
         error = nil
+        
+        let cachedFlightData = flightData // Store current data before fetching new data
         
         print("DEBUG: Fetching flight data from API")
         
@@ -271,23 +339,31 @@ class FlightDataService: ObservableObject {
                     print("DEBUG: Saved response to \(fileURL.path)")
                 }
                 
-                self.parseApiResponse(data: data)
+                self.parseApiResponse(data: data, cachedData: cachedFlightData)
             }
             .store(in: &cancellables)
     }
     
-    private func parseApiResponse(data: Data) {
+    private func parseApiResponse(data: Data, cachedData: [DayData]) {
         do {
             let decoder = JSONDecoder()
             
             // Try to decode as an array first
             do {
                 let decodedData = try decoder.decode([DayData].self, from: data)
+                
+                // Detect changes before updating the published data
+                self.detectChanges(oldData: cachedData, newData: decodedData)
+                
                 self.flightData = decodedData
                 self.lastUpdated = Date()
                 self.isLoading = false
                 print("DEBUG: Successfully decoded \(self.flightData.count) days of flight data as array")
                 self.printDecodedData()
+                
+                // Cache the new data
+                self.saveDataToCache()
+                
             } catch let arrayError {
                 print("DEBUG: Failed to decode as array: \(arrayError)")
                 
@@ -298,11 +374,19 @@ class FlightDataService: ObservableObject {
                     }
                     
                     let response = try decoder.decode(ScheduleResponse.self, from: data)
+                    
+                    // Detect changes before updating the published data
+                    self.detectChanges(oldData: cachedData, newData: response.schedule)
+                    
                     self.flightData = response.schedule
                     self.lastUpdated = Date()
                     self.isLoading = false
                     print("DEBUG: Successfully decoded \(self.flightData.count) days from schedule wrapper")
                     self.printDecodedData()
+                    
+                    // Cache the new data
+                    self.saveDataToCache()
+                    
                 } catch let objectError {
                     self.error = "Failed to decode data"
                     self.isLoading = false
@@ -314,6 +398,66 @@ class FlightDataService: ObservableObject {
                 }
             }
         }
+    }
+    
+    // MARK: - Change Detection
+    
+    private func detectChanges(oldData: [DayData], newData: [DayData]) {
+        changedFlights.removeAll()
+        hasChanges = false
+        
+        // Specifically looking for April 1st
+        let targetDate = "Mon, 01Apr"
+        
+        guard let oldDay = oldData.first(where: { $0.individualDay == targetDate }),
+              let newDay = newData.first(where: { $0.individualDay == targetDate }),
+              let oldFlights = oldDay.flights,
+              let newFlights = newDay.flights else {
+            print("DEBUG: Could not find flight data for April 1st to compare")
+            return
+        }
+        
+        // Map flights by duty to easily find corresponding flights
+        let oldFlightMap = Dictionary(uniqueKeysWithValues: oldFlights.map { ($0.duty, $0) })
+        
+        for newFlight in newFlights {
+            if let oldFlight = oldFlightMap[newFlight.duty] {
+                let depTimeChanged = newFlight.depTime != oldFlight.depTime
+                let arrivalTimeChanged = newFlight.arrivalTime != oldFlight.arrivalTime
+                
+                if depTimeChanged || arrivalTimeChanged {
+                    changedFlights.append(ChangedFlight(
+                        flight: newFlight,
+                        oldDepTime: depTimeChanged ? oldFlight.depTime : nil,
+                        oldArrivalTime: arrivalTimeChanged ? oldFlight.arrivalTime : nil,
+                        isNewDepTime: depTimeChanged,
+                        isNewArrivalTime: arrivalTimeChanged
+                    ))
+                    hasChanges = true
+                    
+                    print("DEBUG: Detected change in flight \(newFlight.duty)")
+                    if depTimeChanged {
+                        print("DEBUG: Departure time changed from \(oldFlight.depTime) to \(newFlight.depTime)")
+                    }
+                    if arrivalTimeChanged {
+                        print("DEBUG: Arrival time changed from \(oldFlight.arrivalTime) to \(newFlight.arrivalTime)")
+                    }
+                }
+            } else {
+                // This is a new flight that wasn't in the old data
+                changedFlights.append(ChangedFlight(
+                    flight: newFlight,
+                    oldDepTime: nil,
+                    oldArrivalTime: nil,
+                    isNewDepTime: true,
+                    isNewArrivalTime: true
+                ))
+                hasChanges = true
+                print("DEBUG: Detected new flight \(newFlight.duty)")
+            }
+        }
+        
+        print("DEBUG: Found \(changedFlights.count) changed flights")
     }
     
     private func printDecodedData() {
@@ -332,18 +476,20 @@ class FlightDataService: ObservableObject {
         }
     }
     
-    // Mock data for development and testing
+    // MARK: - Mock Data
+    
+    // For testing purposes, we'll modify the mock data to simulate time changes
     private func loadMockData() {
-        print("DEBUG: Loading mock flight data")
+        print("DEBUG: Loading mock flight data with simulated changes")
         
-        // Create mock flight data
+        // Create mock flight data with different times to simulate changes
         let flight1 = Flight(
             duty: "CAI8001",
             departure: "SOF",
             arrival: "WAW",
-            depTime: "04:45",
+            depTime: "05:15", // Changed from 04:45
             arrivalTime: "07:45",
-            checkIn: "03:45",
+            checkIn: "04:15", // Changed from 03:45
             checkOut: nil,
             aircraft: "A320/BHL",
             cockpit: "TRI G.GOSPODINOV; COP US R. BERNARDO",
@@ -355,9 +501,9 @@ class FlightDataService: ObservableObject {
             departure: "WAW",
             arrival: "AYT",
             depTime: "08:30",
-            arrivalTime: "10:45",
+            arrivalTime: "11:15", // Changed from 10:45
             checkIn: nil,
-            checkOut: "12:10",
+            checkOut: "12:40", // Changed from 12:10
             aircraft: "A320/BHL",
             cockpit: "TRI G.GOSPODINOV; COP US R. BERNARDO",
             cabin: "SEN CCM S.ZHEKOVA; CCM 2 Y.BOEVA; CCM M.ANDREEV"
@@ -383,9 +529,62 @@ class FlightDataService: ObservableObject {
         print("DEBUG: Using mock data with \(self.flightData.count) days")
         self.lastUpdated = Date()
         self.isLoading = false
+        
+        // Simulate detecting changes from cache
+        if !changedFlights.isEmpty {
+            return // Already detected changes, don't override
+        }
+        
+        // Create simulated old flights for comparison
+        let oldFlight1 = Flight(
+            duty: "CAI8001",
+            departure: "SOF",
+            arrival: "WAW",
+            depTime: "04:45", // Original time
+            arrivalTime: "07:45",
+            checkIn: "03:45",
+            checkOut: nil,
+            aircraft: "A320/BHL",
+            cockpit: "TRI G.GOSPODINOV; COP US R. BERNARDO",
+            cabin: "SEN CCM S.ZHEKOVA; INS CCM A.IVANOVA; CCM K.KALOYANOV"
+        )
+        
+        let oldFlight2 = Flight(
+            duty: "CAI8002",
+            departure: "WAW",
+            arrival: "AYT",
+            depTime: "08:30",
+            arrivalTime: "10:45", // Original time
+            checkIn: nil,
+            checkOut: "12:10",
+            aircraft: "A320/BHL",
+            cockpit: "TRI G.GOSPODINOV; COP US R. BERNARDO",
+            cabin: "SEN CCM S.ZHEKOVA; CCM 2 Y.BOEVA; CCM M.ANDREEV"
+        )
+        
+        // Add simulated changes for testing UI
+        changedFlights.append(ChangedFlight(
+            flight: flight1,
+            oldDepTime: oldFlight1.depTime,
+            oldArrivalTime: nil,
+            isNewDepTime: true,
+            isNewArrivalTime: false
+        ))
+        
+        changedFlights.append(ChangedFlight(
+            flight: flight2,
+            oldDepTime: nil,
+            oldArrivalTime: oldFlight2.arrivalTime,
+            isNewDepTime: false,
+            isNewArrivalTime: true
+        ))
+        
+        hasChanges = true
+        print("DEBUG: Simulated \(changedFlights.count) changed flights for testing")
     }
     
-    // Helper methods for the calendar view
+    // MARK: - Helper Methods (unchanged)
+    
     func getFlightStatus(date: Int, month: Int) -> FlightStatus {
         guard !flightData.isEmpty else { return .none }
         

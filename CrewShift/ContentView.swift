@@ -1,5 +1,403 @@
 import SwiftUI
 
+struct AnimatedFlightCard: View {
+    let flight: Flight
+    let index: Int
+    let changedFlight: FlightDataService.ChangedFlight?
+    
+    @State private var showCrewDetails = false
+    @State private var appear = false
+    @State private var chevronRotation: Double = 0
+    
+    // Animation states
+    @State private var showOldDepTime = true
+    @State private var showOldArrTime = true
+    @State private var animationTriggered = false
+    @State private var showChangeAlert = true
+    @State private var highlightChanges = false
+    
+    // Sample crew images - in a real app, this would come from the flight data
+    let crewImages = ["crew1", "crew2", "crew3", "crew4", "crew5"]
+    
+    var body: some View {
+        VStack(spacing: 15) {
+            // Flight header - Origin, Flight number, Destination
+            HStack {
+                // Origin with animated time change if applicable
+                VStack(alignment: .leading) {
+                    Text("\(flight.departure) \(FlagEmoji.flag(for: flight.departure))")
+                        .font(.system(size: 18))
+                        .foregroundColor(Color(hex: "E4E5E9"))
+                    
+                    if let changedFlight = changedFlight, changedFlight.isNewDepTime, let oldTime = changedFlight.oldDepTime {
+                        ZStack {
+                            // Old time (slides out)
+                            Text(oldTime)
+                                .font(.system(size: 32, weight: .bold))
+                                .foregroundColor(Color(hex: "080808"))
+                                .opacity(showOldDepTime ? 1 : 0)
+                                .offset(x: showOldDepTime ? 0 : -40)
+                            
+                            // New time (slides in)
+                                                            Text(flight.depTime)
+                                .font(.system(size: 32, weight: .bold))
+                                .foregroundColor(highlightChanges ? Color(hex: "4CAF50") : Color(hex: "080808"))
+                                .opacity(showOldDepTime ? 0 : 1)
+                                .offset(x: showOldDepTime ? 40 : 0)
+                                .scaleEffect(showOldDepTime ? 0.9 : 1.0)
+                        }
+                    } else {
+                        Text(flight.depTime)
+                            .font(.system(size: 32, weight: .bold))
+                            .foregroundColor(Color(hex: "080808"))
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                
+                // Flight number
+                VStack {
+                    Text(flight.duty)
+                        .font(.system(size: 15))
+                        .foregroundColor(Color(hex: "E4E5E9"))
+                        .padding(.top, 15)
+                }
+                .frame(width: 80)
+                
+                // Destination with animated time change if applicable
+                VStack(alignment: .leading) {
+                    Text("\(flight.arrival) \(FlagEmoji.flag(for: flight.arrival))")
+                        .font(.system(size: 18))
+                        .foregroundColor(Color(hex: "E4E5E9"))
+                    
+                    if let changedFlight = changedFlight, changedFlight.isNewArrivalTime, let oldTime = changedFlight.oldArrivalTime {
+                        ZStack {
+                            // Old time (slides out)
+                            Text(oldTime)
+                                .font(.system(size: 32, weight: .bold))
+                                .foregroundColor(Color(hex: "080808"))
+                                .opacity(showOldArrTime ? 1 : 0)
+                                .offset(x: showOldArrTime ? 0 : -40)
+                            
+                            // New time (slides in)
+                                                            Text(flight.arrivalTime)
+                                .font(.system(size: 32, weight: .bold))
+                                .foregroundColor(highlightChanges ? Color(hex: "4CAF50") : Color(hex: "080808"))
+                                .opacity(showOldArrTime ? 0 : 1)
+                                .offset(x: showOldArrTime ? 40 : 0)
+                                .scaleEffect(showOldArrTime ? 0.9 : 1.0)
+                        }
+                    } else {
+                        Text(flight.arrivalTime)
+                            .font(.system(size: 32, weight: .bold))
+                            .foregroundColor(Color(hex: "080808"))
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+            
+            // Flight progress
+            VStack(spacing: 10) {
+                HStack {
+                    Circle()
+                        .fill(Color.gray.opacity(0.1))
+                        .frame(width: 5, height: 5)
+                    
+                    ZStack(alignment: .center) {
+                        Image("DottedLines")
+                            .resizable()
+                            .frame(height: 24)
+                    }
+                    
+                    Circle()
+                        .fill(Color.gray.opacity(0.1))
+                        .frame(width: 5, height: 5)
+                }
+                
+                if changedFlight != nil && highlightChanges {
+                    Text(DateUtils.calculateDuration(depTime: flight.depTime, arrTime: flight.arrivalTime))
+                        .font(.system(size: 16))
+                        .foregroundColor(Color(hex: "4CAF50"))
+                        .fontWeight(.semibold)
+                } else {
+                    Text(DateUtils.calculateDuration(depTime: flight.depTime, arrTime: flight.arrivalTime))
+                        .font(.system(size: 16))
+                        .foregroundColor(Color(hex: "E4E5E9"))
+                }
+            }
+            .padding(.top, -22)
+            
+            // Flight footer - Aircraft and Crew
+            HStack {
+                // Aircraft
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("A/C")
+                        .font(.system(size: 12))
+                        .foregroundColor(.gray)
+                    
+                    Text(flight.aircraft)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(Color(hex: "080808"))
+                }
+                .padding(.horizontal, 15)
+                .padding(.vertical, 10)
+                .background(Color(hex: "F0F4F8"))
+                .cornerRadius(15)
+                
+                Spacer()
+                
+                // Crew button
+                Button(action: {
+                    withAnimation(Animation.spring(response: 0.4, dampingFraction: 0.7)) {
+                        showCrewDetails.toggle()
+                        chevronRotation = showCrewDetails ? 180 : 0
+                    }
+                }) {
+                    HStack(spacing: 5) {
+                        // Chevron
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(Color(hex: "1a237e"))
+                            .rotationEffect(.degrees(chevronRotation))
+                            .frame(width: 24, height: 24)
+                            .background(Color(hex: "1a237e").opacity(0.1))
+                            .clipShape(Circle())
+                        
+                        // Stacked crew images
+                        ZStack(alignment: .leading) {
+                            ForEach(0..<3, id: \.self) { i in
+                                Image(crewImages[i])
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(width: 34, height: 34)
+                                    .clipShape(Circle())
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.white, lineWidth: 2)
+                                    )
+                                    .offset(x: CGFloat(i) * 16)
+                            }
+                        }
+                        .padding(.horizontal, 4)
+                    }
+                }
+                .padding(.trailing, 25)
+            }
+            
+            // Expandable Crew Details
+            if showCrewDetails {
+                VStack(spacing: 10) {
+                    Divider()
+                    
+                    // Cockpit section
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Cockpit:")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.black)
+                        
+                        HStack(spacing: 8) {
+                            ForEach(0..<2, id: \.self) { i in
+                                Image(crewImages[i])
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(width: 28, height: 28)
+                                    .clipShape(Circle())
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.white, lineWidth: 2)
+                                    )
+                            }
+                        }
+                        
+                        Text(flight.cockpit)
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    Divider()
+                    
+                    // Cabin section
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Cabin:")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.black)
+                        
+                        HStack(spacing: 8) {
+                            ForEach(2..<5, id: \.self) { i in
+                                Image(crewImages[min(i, crewImages.count-1)])
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(width: 28, height: 28)
+                                    .clipShape(Circle())
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.white, lineWidth: 2)
+                                    )
+                            }
+                        }
+                        
+                        Text(flight.cabin)
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+            
+            // Change notification banner if needed
+            if let changedFlight = changedFlight, showChangeAlert {
+                HStack {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .foregroundColor(Color(hex: "4CAF50"))
+                        .font(.system(size: 16))
+                    
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Flight time updated")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(Color(hex: "333333"))
+                        
+                        if changedFlight.isNewDepTime, let oldTime = changedFlight.oldDepTime {
+                            Text("Departure: \(oldTime) → \(flight.depTime)")
+                                .font(.system(size: 12))
+                                .foregroundColor(Color(hex: "555555"))
+                        }
+                        
+                        if changedFlight.isNewArrivalTime, let oldTime = changedFlight.oldArrivalTime {
+                            Text("Arrival: \(oldTime) → \(flight.arrivalTime)")
+                                .font(.system(size: 12))
+                                .foregroundColor(Color(hex: "555555"))
+                        }
+                    }
+                    
+                    Spacer()
+                    
+                    Button(action: {
+                        withAnimation(.spring()) {
+                            showChangeAlert = false
+                            // Start the transition animation with a slight delay
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                animateTimeChanges()
+                            }
+                        }
+                    }) {
+                        Text("Animate")
+                            .font(.system(size: 12))
+                            .foregroundColor(Color.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color(hex: "4CAF50"))
+                            .cornerRadius(12)
+                    }
+                }
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color(hex: "F0F7F0"))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color(hex: "4CAF50").opacity(0.2), lineWidth: 1)
+                        )
+                )
+                .padding(.top, 8)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(15)
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color.white)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .stroke(
+                            changedFlight != nil
+                                ? (highlightChanges
+                                   ? Color(hex: "4CAF50").opacity(0.5)
+                                   : Color(hex: "4CAF50").opacity(0.2))
+                                : Color.clear,
+                            lineWidth: changedFlight != nil ? 1.5 : 0
+                        )
+                )
+        )
+        // Shadow removed as requested
+        .opacity(appear ? 1 : 0)
+        .scaleEffect(appear ? 1 : 0.92)
+        .offset(y: appear ? 0 : 15)
+        .blur(radius: appear ? 0 : 5)
+        .onAppear {
+            // Delayed card entrance animation for a staggered effect
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(index) * 0.2) {
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
+                    appear = true
+                }
+            }
+            
+            // Reset animation states when the view appears
+            showOldDepTime = true
+            showOldArrTime = true
+            animationTriggered = false
+            showChangeAlert = true
+            highlightChanges = false
+        }
+    }
+    
+    // Function to animate the time changes with beautiful choreography
+    private func animateTimeChanges() {
+        // Initial delay before starting the sequence
+        let initialDelay = 0.3
+        
+        // First gently highlight the changed times
+        DispatchQueue.main.asyncAfter(deadline: .now() + initialDelay) {
+            withAnimation(.easeInOut(duration: 0.6)) {
+                highlightChanges = true
+            }
+            
+            // Brief pause to let user notice the highlight
+            let highlightPause = 0.8
+            
+            // Animate departure time with a gentle spring
+            if let changedFlight = changedFlight, changedFlight.isNewDepTime {
+                DispatchQueue.main.asyncAfter(deadline: .now() + highlightPause) {
+                    withAnimation(.spring(response: 0.7, dampingFraction: 0.7)) {
+                        showOldDepTime = false
+                    }
+                    
+                    // Play subtle scale animation on the new value
+                    let scaleDuration = 0.3
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        withAnimation(.easeOut(duration: scaleDuration)) {
+                            // This will be handled by the changed color
+                        }
+                    }
+                }
+            }
+            
+            // Animate arrival time with a matching spring but delayed
+            if let changedFlight = changedFlight, changedFlight.isNewArrivalTime {
+                // Add enough delay so the first animation has time to complete
+                DispatchQueue.main.asyncAfter(deadline: .now() + highlightPause + 0.8) {
+                    withAnimation(.spring(response: 0.7, dampingFraction: 0.7)) {
+                        showOldArrTime = false
+                    }
+                    
+                    // Play subtle scale animation on the new value
+                    let scaleDuration = 0.3
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        withAnimation(.easeOut(duration: scaleDuration)) {
+                            // This will be handled by the changed color
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Mark animation as triggered
+        animationTriggered = true
+    }
+}
+
+import SwiftUI
+
 struct ContentView: View {
     // User data
     let userName = "Dimitar"
@@ -11,6 +409,7 @@ struct ContentView: View {
     @State private var selectedDate = 1 // Default to first day
     @State private var isDateSelected = false
     @State private var calendarExpanded = true
+    @State private var showChangeAlert = false
     
     // Animation related states
     @State private var dateSelectionScale: CGFloat = 1.0
@@ -35,7 +434,6 @@ struct ContentView: View {
                     topHeader
                     
                     ZStack{
-
                         // Calendar
                         tinyCalendar
                             .padding(.horizontal, 15)
@@ -47,7 +445,6 @@ struct ContentView: View {
                                 .offset(y: 140)
                                 .scaleEffect(2)
                                 .ignoresSafeArea())
-
                     }
                     
                     // Flights section
@@ -55,9 +452,34 @@ struct ContentView: View {
                         .padding(.top, 12)
                 }
             }
+            
+            // Flight changes alert overlay
+            if showChangeAlert && flightService.hasChanges {
+                VStack {
+                    changesAlertView
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .zIndex(1)
+            }
         }
         .onAppear {
             updateSelectedDayData()
+            
+            // Show alert about changes after a short delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                if flightService.hasChanges {
+                    withAnimation(.spring()) {
+                        showChangeAlert = true
+                    }
+                    
+                    // Auto-dismiss after 5 seconds
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+                        withAnimation(.spring()) {
+                            showChangeAlert = false
+                        }
+                    }
+                }
+            }
         }
         .onChange(of: selectedDate) { _ in
             updateSelectedDayData()
@@ -68,7 +490,87 @@ struct ContentView: View {
         }
         .onChange(of: flightService.lastUpdated) { _ in
             updateSelectedDayData()
+            
+            // Show alert about changes if any are detected
+            if flightService.hasChanges {
+                withAnimation(.spring()) {
+                    showChangeAlert = true
+                }
+                
+                // Auto-dismiss after 5 seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+                    withAnimation(.spring()) {
+                        showChangeAlert = false
+                    }
+                }
+            }
         }
+    }
+    
+    // MARK: - Changes Alert View
+    
+    private var changesAlertView: some View {
+        VStack(spacing: 10) {
+            HStack {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(Color(hex: "FF9800"))
+                    .font(.system(size: 20))
+                
+                Text("Flight Schedule Updated")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                
+                Spacer()
+                
+                Button(action: {
+                    withAnimation(.spring()) {
+                        showChangeAlert = false
+                    }
+                }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.white.opacity(0.8))
+                        .padding(8)
+                        .background(Color.white.opacity(0.2))
+                        .clipShape(Circle())
+                }
+            }
+            
+            Text("Your flight times for April 1st have been updated. Check the details below.")
+                .font(.system(size: 14))
+                .foregroundColor(.white.opacity(0.8))
+                .multilineTextAlignment(.leading)
+            
+            HStack {
+                Button(action: {
+                    // Scroll to April 1st and select it
+                    selectedMonth = 3 // April
+                    selectedDate = 1
+                    
+                    withAnimation(.spring()) {
+                        showChangeAlert = false
+                    }
+                }) {
+                    Text("View Changes")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 8)
+                        .background(Color(hex: "4CAF50"))
+                        .cornerRadius(20)
+                }
+                
+                Spacer()
+            }
+        }
+        .padding(15)
+        .background(
+            RoundedRectangle(cornerRadius: 15)
+                .fill(Color(hex: "1a237e").opacity(0.95))
+        )
+        .shadow(color: Color.black.opacity(0.3), radius: 10)
+        .padding(.horizontal, 15)
+        .padding(.top, 20)
     }
     
     // MARK: - Top Header
@@ -97,18 +599,17 @@ struct ContentView: View {
             .padding(.bottom, 10)
             
             // Time display
-            // Time display
             HStack(spacing: 15) {
                 Text(dutyTimes.start.isEmpty ? "--:--" : dutyTimes.start)
-                    .font(.system(size: 40, weight: .semibold))  // Reduced from 65
+                    .font(.system(size: 40, weight: .semibold))
                     .foregroundColor(.white)
                 
                 Text("•")
-                    .font(.system(size: 34))  // Reduced from 65
+                    .font(.system(size: 34))
                     .foregroundColor(.white.opacity(0.2))
                 
                 Text(dutyTimes.end.isEmpty ? "--:--" : dutyTimes.end)
-                    .font(.system(size: 40, weight: .semibold))  // Reduced from 65
+                    .font(.system(size: 40, weight: .semibold))
                     .foregroundColor(.white)
             }
             .padding(.vertical, 15)
@@ -134,7 +635,7 @@ struct ContentView: View {
         .background(Color(hex: "080808"))
     }
     
-    // MARK: - Calendar (Enhanced version)
+    // MARK: - Calendar (Same as before, no changes needed)
     private var tinyCalendar: some View {
         VStack(spacing: 0) {
             // Month selector and expand/collapse button
@@ -255,9 +756,11 @@ struct ContentView: View {
         .cornerRadius(20)
         .shadow(color: Color.black.opacity(0.1), radius: 4)
     }
+    
     // MARK: - Day Cell
     private func dayCell(_ day: CalendarDay) -> some View {
         let isSelected = day.isCurrentMonth && day.date == selectedDate && day.month == selectedMonth
+        let hasChanges = day.isCurrentMonth && day.date == 1 && day.month == 3 && flightService.hasChanges
         
         return Button(action: {
             if day.isCurrentMonth {
@@ -287,8 +790,20 @@ struct ContentView: View {
                         .frame(width: 4, height: 4)
                         .offset(y: 10)
                 }
+                
+                // Changes indicator for April 1st
+                if hasChanges && !isSelected {
+                    Circle()
+                        .fill(Color(hex: "FF9800"))
+                        .frame(width: 6, height: 6)
+                        .offset(y: -10)
+                }
             }
             .opacity(day.isCurrentMonth ? 1 : 0.4)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(hasChanges && !isSelected ? Color(hex: "FF9800") : Color.clear, lineWidth: 1.5)
+            )
         }
     }
     
@@ -313,7 +828,6 @@ struct ContentView: View {
                 Text("Today's Plan")
                     .font(.system(size: 28, weight: .semibold))
                     .foregroundColor(Color(hex: "080808"))
-
                 
                 Spacer()
                 
@@ -336,7 +850,7 @@ struct ContentView: View {
                 } else if selectedDayData?.duty == "Day Off" {
                     noFlightsView(message: "Day Off - Enjoy your rest!")
                 } else if let flights = selectedDayData?.flights, !flights.isEmpty {
-                    flightsList(flights)
+                    enhancedFlightsList(flights)
                 } else {
                     noFlightsView(message: "No flight details available for this day.")
                 }
@@ -351,16 +865,22 @@ struct ContentView: View {
         .background(Color(hex: "F8F7FA"))
     }
     
-    // MARK: - Flight List
-    private func flightsList(_ flights: [Flight]) -> some View {
+    // MARK: - Enhanced Flight List
+    private func enhancedFlightsList(_ flights: [Flight]) -> some View {
         VStack(spacing: 15) {
             ForEach(Array(flights.enumerated()), id: \.element.id) { index, flight in
-                FlightCard(flight: flight, index: index)
+                let changedFlight = flightService.changedFlights.first(where: { $0.flight.duty == flight.duty })
+                
+                AnimatedFlightCard(
+                    flight: flight,
+                    index: index,
+                    changedFlight: changedFlight
+                )
             }
         }
     }
     
-    // MARK: - Loading, Error and No Flights Views
+    // MARK: - Loading, Error and No Flights Views (unchanged)
     private var loadingView: some View {
         VStack(spacing: 15) {
             ProgressView()
@@ -526,6 +1046,11 @@ struct ContentView: View {
         
         if day.flightStatus == .dayOff {
             return Color(hex: "FF6B6B")
+        }
+        
+        // Highlight April 1st if it has changes
+        if day.date == 1 && day.month == 3 && flightService.hasChanges {
+            return Color(hex: "FF9800")
         }
         
         return Color.black
